@@ -12,7 +12,7 @@ from gevent.pywsgi import WSGIServer
 from botify.data import DataLogger, Datum
 from botify.experiment import Experiments, Treatment
 from botify.recommenders.contextual import Contextual
-from botify.recommenders.random import Random
+from botify.recommenders.best import Best
 from botify.track import Catalog
 
 import numpy as np
@@ -41,6 +41,9 @@ parser = reqparse.RequestParser()
 parser.add_argument("track", type=int, location="json", required=True)
 parser.add_argument("time", type=float, location="json", required=True)
 
+# dict[user] = first song user listened
+first_songs = {}
+
 
 class Hello(Resource):
     def get(self):
@@ -65,12 +68,15 @@ class NextTrack(Resource):
 
         args = parser.parse_args()
 
-        # TODO Seminar 5 step 3: Wire CONTEXTUAL A/B experiment
-        treatment = Experiments.CONTEXTUAL.assign(user)
+        # Add previous track
+        if user not in first_songs:
+            first_songs[user] = args.track
+
+        treatment = Experiments.BEST.assign(user)
         if treatment == Treatment.T1:
-            recommender = Contextual(tracks_redis.connection, catalog)
+            recommender = Best(tracks_redis.connection, catalog, first_songs)
         else:
-            recommender = Random(tracks_redis.connection)
+            recommender = Contextual(tracks_redis.connection, catalog)
 
         recommendation = recommender.recommend_next(user, args.track, args.time)
 
@@ -102,6 +108,11 @@ class LastTrack(Resource):
                 time.time() - start,
             ),
         )
+
+        # Remove user's first song (next session will start with new one)
+        if user in first_songs:
+            del first_songs[user]
+
         return {"user": user}
 
 
